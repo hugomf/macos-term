@@ -1,106 +1,47 @@
 use gtk4::prelude::*;
 use gtk4::{glib, Application, ApplicationWindow, Box, Button, ColorButton, Label, Orientation, Scale, ScrolledWindow};
-use objc2::rc::Retained;
-use objc2::runtime::AnyObject;
-use objc2::msg_send;
-use objc2_app_kit::{NSWindow, NSColor};
 use std::rc::Rc;
 use std::cell::RefCell;
 
-// MARK: - Private CoreGraphics API
-type CGSConnectionID = u32;
-type CGSWindowID = u32;
-
-#[link(name = "CoreGraphics", kind = "framework")]
+// External C functions from our bridge
 unsafe extern "C" {
-    fn CGSDefaultConnectionForThread() -> CGSConnectionID;
-}
-
-fn cgs_set_window_background_blur_radius(
-    connection: CGSConnectionID,
-    window_id: CGSWindowID,
-    radius: u32,
-) -> i32 {
-    let lib = unsafe {
-        match libloading::Library::new(
-            "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics"
-        ) {
-            Ok(lib) => lib,
-            Err(e) => {
-                eprintln!("❌ Failed to load CoreGraphics: {}", e);
-                return -1;
-            }
-        }
-    };
-
-    let func: libloading::Symbol<unsafe extern "C" fn(CGSConnectionID, CGSWindowID, u32) -> i32> =
-        unsafe {
-            match lib.get(b"CGSSetWindowBackgroundBlurRadius") {
-                Ok(f) => f,
-                Err(e) => {
-                    eprintln!("❌ Failed to load CGSSetWindowBackgroundBlurRadius: {}", e);
-                    return -1;
-                }
-            }
-        };
-
-    let result = unsafe { func(connection, window_id, radius) };
-    println!("🔄 Blur radius={}, result={}", radius, result);
-    result
+    fn macos_blur_init() -> i32;
+    fn macos_blur_apply_to_gtk_window(window: *mut gtk4::ffi::GtkWindow, radius: u32) -> i32;
 }
 
 struct WindowBlurManager {
-    connection_id: CGSConnectionID,
+    initialized: bool,
 }
 
 impl WindowBlurManager {
     fn new() -> Self {
-        let connection_id = unsafe { CGSDefaultConnectionForThread() };
-        println!("✅ Got connection ID: {}", connection_id);
-        Self { connection_id }
+        let result = unsafe { macos_blur_init() };
+        let initialized = result == 0;
+        
+        if initialized {
+            println!("✅ WindowBlurManager initialized successfully");
+        } else {
+            eprintln!("❌ WindowBlurManager failed to initialize");
+        }
+        
+        Self { initialized }
     }
 
-    fn set_blur(&self, ns_window: &NSWindow, radius: u32) {
-        unsafe {
-            ns_window.setOpaque(false);
-            let clear_color = NSColor::clearColor();
-            ns_window.setBackgroundColor(Some(&clear_color));
-            ns_window.setHasShadow(true);
-            ns_window.setTitlebarAppearsTransparent(true);
-            
-            let window_number = ns_window.windowNumber() as CGSWindowID;
-            cgs_set_window_background_blur_radius(self.connection_id, window_number, radius);
-            
-            ns_window.invalidateShadow();
-            if let Some(content_view) = ns_window.contentView() {
-                content_view.setNeedsDisplay(true);
-            }
+    fn set_blur(&self, window: &ApplicationWindow, radius: u32) {
+        if !self.initialized {
+            eprintln!("❌ Cannot apply blur - manager not initialized");
+            return;
+        }
+
+        let window_ptr = window.as_ptr() as *mut gtk4::ffi::GtkWindow;
+        let result = unsafe { macos_blur_apply_to_gtk_window(window_ptr, radius) };
+        
+        if result == 0 {
+            println!("✅ Blur applied successfully: radius={}", radius);
+        } else {
+            eprintln!("❌ Failed to apply blur: result={}", result);
         }
     }
-}
-
-// Safe wrapper for getting NSWindow
-fn get_ns_window(gtk_window: &ApplicationWindow) -> Option<Retained<NSWindow>> {
-    let surface = gtk_window.surface()?;
-    let surface_ptr = surface.as_ptr() as *mut AnyObject;
-    
-    // Check if the surface responds to nativeWindow selector
-    let responds: bool = unsafe { msg_send![surface_ptr, respondsToSelector: objc2::sel!(nativeWindow)] };
-    
-    if !responds {
-        eprintln!("❌ Surface does not respond to nativeWindow selector");
-        return None;
-    }
-    
-    let ns_window_ptr: *mut AnyObject = unsafe { msg_send![surface_ptr, nativeWindow] };
-    
-    if ns_window_ptr.is_null() {
-        eprintln!("❌ Failed to get NSWindow from GdkSurface - nativeWindow returned null");
-        return None;
-    }
-    
-    // Try to cast to NSWindow - Retained::retain returns Option, not Result
-    unsafe { Retained::retain(ns_window_ptr as *mut NSWindow) }
 }
 
 fn load_css() {
@@ -109,47 +50,92 @@ fn load_css() {
         "window {
             background: transparent;
         }
-        .controls-panel {
-            background: #1e1e1e;
-            border-radius: 8px;
-            margin: 8px;
-            padding: 16px;
+        .header {
+            background: rgba(51, 51, 64, 1.0);
+            padding: 12px;
         }
-        .controls-title {
-            color: #ffffff;
-            font-weight: bold;
+        .header-title {
+            color: white;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .traffic-light {
+            min-width: 12px;
+            min-height: 12px;
+            border-radius: 6px;
+        }
+        .traffic-light.red {
+            background: #ff5f56;
+        }
+        .traffic-light.yellow {
+            background: #ffbd2e;
+        }
+        .traffic-light.green {
+            background: #27c93f;
+        }
+        .terminal-viewport {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(0, 255, 255, 0.3);
+        }
+        .terminal-text {
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
             font-size: 14px;
         }
+        .terminal-text.gray {
+            color: #888;
+        }
+        .terminal-text.white {
+            color: #fff;
+        }
+        .terminal-text.cyan {
+            color: #00ffff;
+        }
+        .terminal-text.green {
+            color: #00ff00;
+        }
+        .controls-panel {
+            background: rgba(38, 38, 51, 1.0);
+            padding: 20px;
+        }
+        .controls-title {
+            color: white;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 16px;
+            font-weight: bold;
+        }
         .control-label {
-            color: #cccccc;
-            font-size: 11px;
+            color: white;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 12px;
         }
         .control-value {
             color: #00ff00;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 12px;
+        }
+        .preset-label {
+            color: #888;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 10px;
+        }
+        .info-title {
+            color: #00ffff;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
             font-size: 11px;
-            font-family: monospace;
+            font-weight: bold;
         }
-        .terminal-background {
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 8px;
-            margin: 8px;
-        }
-        .terminal-text {
-            color: #000000;
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-        }
-        .preset-color {
-            min-width: 20px;
-            min-height: 20px;
-            border-radius: 10px;
-            padding: 0;
-            margin: 2px;
+        .info-text {
+            color: rgba(255, 255, 255, 0.8);
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 10px;
         }
         .warning-text {
-            color: #ff4444;
-            font-weight: bold;
-            font-size: 11px;
+            color: #ff0000;
+            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
+            font-size: 10px;
+            font-weight: 600;
+            margin-top: 6px;
         }",
     );
 
@@ -160,33 +146,29 @@ fn load_css() {
     );
 }
 
-fn update_terminal_background(terminal_background: &Box, opacity: f64, color: &gtk4::gdk::RGBA) {
-    let r = (color.red() * 255.0) as u32;
-    let g = (color.green() * 255.0) as u32;
-    let b = (color.blue() * 255.0) as u32;
-    
-    // Update the CSS for the terminal background with the selected color and opacity
-    let provider = gtk4::CssProvider::new();
-    provider.load_from_data(&format!(
-        ".terminal-background {{
-            background: rgba({}, {}, {}, {});
-            border-radius: 8px;
-            margin: 8px;
-        }}
-        .terminal-text {{
-            color: {};
-            font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 13px;
-        }}",
-        r, g, b, opacity,
-        if color.red() > 0.5 && color.green() > 0.5 && color.blue() > 0.5 { "#000000" } else { "#ffffff" }
-    ));
+fn create_terminal_line(text: &str, color: &str) -> Label {
+    let label = Label::new(Some(text));
+    label.set_halign(gtk4::Align::Start);
+    label.add_css_class("terminal-text");
+    label.add_css_class(color);
+    label
+}
 
-    gtk4::style_context_add_provider_for_display(
-        &gtk4::gdk::Display::default().expect("Could not connect to a display."),
-        &provider,
-        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
-    );
+fn create_terminal_prompt() -> Box {
+    let prompt_box = Box::new(Orientation::Horizontal, 6);
+    
+    let tilde = Label::new(Some("~"));
+    tilde.add_css_class("terminal-text");
+    tilde.add_css_class("cyan");
+    
+    let arrow = Label::new(Some("$"));
+    arrow.add_css_class("terminal-text");
+    arrow.add_css_class("green");
+    
+    prompt_box.append(&tilde);
+    prompt_box.append(&arrow);
+    
+    prompt_box
 }
 
 fn build_ui(app: &Application) {
@@ -197,116 +179,156 @@ fn build_ui(app: &Application) {
         .default_height(600)
         .build();
 
-    let _blur_manager = Rc::new(WindowBlurManager::new());
+    let blur_manager = Rc::new(WindowBlurManager::new());
     let main_box = Box::new(Orientation::Vertical, 0);
     
-    // Store current state
-    let current_opacity = Rc::new(RefCell::new(0.8)); // Start with 80% opacity
-    let current_color = Rc::new(RefCell::new(gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0))); // Start with white
+    // Store current transparency
+    let current_transparency = Rc::new(RefCell::new(70.0));
     
-    // Terminal viewport with separate background container - Now with more space since header is removed
-    let terminal_background = Box::new(Orientation::Vertical, 0);
-    terminal_background.add_css_class("terminal-background");
-    terminal_background.set_vexpand(true);
+    // Header
+    let header = Box::new(Orientation::Horizontal, 0);
+    header.add_css_class("header");
     
+    let title = Label::new(Some("Terminal - Custom Blur API"));
+    title.add_css_class("header-title");
+    title.set_hexpand(true);
+    title.set_halign(gtk4::Align::Start);
+    
+    let traffic_lights = Box::new(Orientation::Horizontal, 6);
+    for color in ["red", "yellow", "green"] {
+        let circle = Box::new(Orientation::Horizontal, 0);
+        circle.set_size_request(12, 12);
+        circle.add_css_class("traffic-light");
+        circle.add_css_class(color);
+        traffic_lights.append(&circle);
+    }
+    
+    header.append(&title);
+    header.append(&traffic_lights);
+    
+    // Terminal viewport
     let terminal_scroll = ScrolledWindow::builder()
         .vexpand(true)
         .hexpand(true)
         .build();
+    terminal_scroll.add_css_class("terminal-viewport");
+    terminal_scroll.set_opacity(0.3); // Initial 70% transparency = 30% opacity
     
-    let terminal_content = Box::new(Orientation::Vertical, 4);
+    let terminal_content = Box::new(Orientation::Vertical, 6);
     terminal_content.set_margin_start(12);
     terminal_content.set_margin_end(12);
     terminal_content.set_margin_top(12);
     terminal_content.set_margin_bottom(12);
     
-    // Use ASCII characters only to avoid font loading issues
-    let terminal_lines = [
-        "Last login: Sun Oct 19 14:23:45 on ttys001",
-        "~ $ ls -la",
-        "total 64",
-        "drwxr-xr-x  12 user  staff   384 Oct 19 14:23 .",
-        "drwxr-xr-x   5 user  staff   160 Oct 19 14:20 ..",
-        "-rw-r--r--   1 user  staff   284 Oct 19 14:23 main.rs",
-        "~ $ ./target/debug/macos-term",
-        "Starting terminal with blur effects...",
-        "~ $ _",
-    ];
+    terminal_content.append(&create_terminal_line("Last login: Sun Oct 19 14:23:45 on ttys001", "gray"));
+    terminal_content.append(&create_terminal_prompt());
     
-    for line in terminal_lines {
-        let label = Label::new(Some(line));
-        label.set_halign(gtk4::Align::Start);
-        label.add_css_class("terminal-text");
-        terminal_content.append(&label);
+    for i in 0..15 {
+        terminal_content.append(&create_terminal_prompt());
+        terminal_content.append(&create_terminal_line(
+            &format!("echo 'Testing blur radius: {}'", i * 5),
+            "white"
+        ));
+        terminal_content.append(&create_terminal_line(
+            &format!("Testing blur radius: {}", i * 5),
+            "cyan"
+        ));
     }
     
+    terminal_content.append(&create_terminal_prompt());
     terminal_scroll.set_child(Some(&terminal_content));
-    terminal_background.append(&terminal_scroll);
     
-    // Controls panel - More compact
-    let controls = Box::new(Orientation::Vertical, 12);
+    // Controls panel
+    let controls = Box::new(Orientation::Vertical, 20);
     controls.add_css_class("controls-panel");
     
+    let controls_title_box = Box::new(Orientation::Horizontal, 6);
+    let sparkles = Label::new(Some("*"));
     let controls_title = Label::new(Some("Window Effects"));
-    controls_title.set_halign(gtk4::Align::Start);
     controls_title.add_css_class("controls-title");
+    controls_title_box.append(&sparkles);
+    controls_title_box.append(&controls_title);
     
-    // Opacity slider - More compact
-    let opacity_box = Box::new(Orientation::Vertical, 6);
-    let opacity_label_box = Box::new(Orientation::Horizontal, 0);
-    let opacity_label = Label::new(Some("Background Opacity:"));
-    opacity_label.set_hexpand(true);
-    opacity_label.set_halign(gtk4::Align::Start);
-    opacity_label.add_css_class("control-label");
+    // Transparency slider
+    let transparency_box = Box::new(Orientation::Vertical, 8);
+    let transparency_label_box = Box::new(Orientation::Horizontal, 0);
+    let transparency_label = Label::new(Some("Transparency:"));
+    transparency_label.add_css_class("control-label");
+    transparency_label.set_hexpand(true);
+    transparency_label.set_halign(gtk4::Align::Start);
+    let transparency_value = Label::new(Some("70%"));
+    transparency_value.add_css_class("control-value");
+    transparency_label_box.append(&transparency_label);
+    transparency_label_box.append(&transparency_value);
     
-    let opacity_value = Label::new(Some("80%"));
-    opacity_value.add_css_class("control-value");
+    let transparency_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    transparency_slider.set_value(70.0);
     
-    opacity_label_box.append(&opacity_label);
-    opacity_label_box.append(&opacity_value);
-    
-    let opacity_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    opacity_slider.set_value(80.0);
-    
-    let terminal_background_weak = terminal_background.downgrade();
-    let opacity_value_clone = opacity_value.clone();
-    let current_opacity_clone = current_opacity.clone();
-    let current_color_clone = current_color.clone();
-    
-    opacity_slider.connect_value_changed(move |slider| {
+    let terminal_scroll_weak = terminal_scroll.downgrade();
+    let transparency_value_clone = transparency_value.clone();
+    let current_transparency_clone = current_transparency.clone();
+    transparency_slider.connect_value_changed(move |slider| {
         let value = slider.value();
-        opacity_value_clone.set_text(&format!("{:.0}%", value));
+        transparency_value_clone.set_text(&format!("{:.0}%", value));
+        *current_transparency_clone.borrow_mut() = value;
         
-        let opacity = value / 100.0;
-        *current_opacity_clone.borrow_mut() = opacity;
-        
-        if let Some(background) = terminal_background_weak.upgrade() {
-            let color = current_color_clone.borrow();
-            update_terminal_background(&background, opacity, &color);
+        if let Some(scroll) = terminal_scroll_weak.upgrade() {
+            // Convert transparency to opacity: 0% transparency = 1.0 opacity, 100% transparency = 0.0 opacity
+            scroll.set_opacity(1.0 - (value / 100.0));
         }
     });
     
-    opacity_box.append(&opacity_label_box);
-    opacity_box.append(&opacity_slider);
+    transparency_box.append(&transparency_label_box);
+    transparency_box.append(&transparency_slider);
     
-    // Color picker with preset colors
-    let color_box = Box::new(Orientation::Vertical, 6);
+    // Blur radius slider
+    let blur_box = Box::new(Orientation::Vertical, 8);
+    let blur_label_box = Box::new(Orientation::Horizontal, 0);
+    let blur_label = Label::new(Some("Blur Radius:"));
+    blur_label.add_css_class("control-label");
+    blur_label.set_hexpand(true);
+    blur_label.set_halign(gtk4::Align::Start);
+    let blur_value = Label::new(Some("50 px"));
+    blur_value.add_css_class("control-value");
+    blur_label_box.append(&blur_label);
+    blur_label_box.append(&blur_value);
+    
+    let blur_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    blur_slider.set_value(50.0);
+    
+    let window_weak = window.downgrade();
+    let blur_manager_clone = blur_manager.clone();
+    let blur_value_clone = blur_value.clone();
+    blur_slider.connect_value_changed(move |slider| {
+        let value = slider.value();
+        blur_value_clone.set_text(&format!("{:.0} px", value));
+        
+        if let Some(win) = window_weak.upgrade() {
+            blur_manager_clone.set_blur(&win, value as u32);
+        }
+    });
+    
+    blur_box.append(&blur_label_box);
+    blur_box.append(&blur_slider);
+    
+    // Color picker
+    let color_box = Box::new(Orientation::Vertical, 8);
     let color_label_box = Box::new(Orientation::Horizontal, 0);
     let color_label = Label::new(Some("Glass Tint:"));
+    color_label.add_css_class("control-label");
     color_label.set_hexpand(true);
     color_label.set_halign(gtk4::Align::Start);
-    color_label.add_css_class("control-label");
     
     let color_button = ColorButton::new();
-    color_button.set_rgba(&gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0)); // Start with white for frosted glass
+    color_button.set_rgba(&gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0));
     
     color_label_box.append(&color_label);
     color_label_box.append(&color_button);
     
-    // Preset colors - Same as SwiftUI version
-    let presets_box = Box::new(Orientation::Horizontal, 4);
+    // Preset colors
+    let presets_box = Box::new(Orientation::Horizontal, 8);
     let presets_label = Label::new(Some("Presets:"));
-    presets_label.add_css_class("control-label");
+    presets_label.add_css_class("preset-label");
     presets_box.append(&presets_label);
     
     let presets = [
@@ -318,134 +340,88 @@ fn build_ui(app: &Application) {
         ("Purple", (0.6, 0.2, 0.8)),
     ];
     
-    let terminal_background_weak = terminal_background.downgrade();
-    let current_opacity_clone = current_opacity.clone();
-    let current_color_clone = current_color.clone();
-    let color_button_clone_outer = color_button.clone();
-    
     for (name, (r, g, b)) in presets {
         let preset_btn = Button::new();
         preset_btn.set_size_request(20, 20);
-        preset_btn.add_css_class("preset-color");
         preset_btn.set_tooltip_text(Some(name));
         
-        // Set the button background color
-        let provider = gtk4::CssProvider::new();
-        provider.load_from_data(&format!(
-            ".preset-color {{
-                background: rgb({}, {}, {});
-                min-width: 20px;
-                min-height: 20px;
-                border-radius: 10px;
-                padding: 0;
-                margin: 2px;
-            }}",
+        // Style each button with its color
+        let css = format!(
+            ".preset-{} {{ background: rgb({}, {}, {}); min-width: 20px; min-height: 20px; border-radius: 10px; }}",
+            name.to_lowercase(),
             (r * 255.0) as u32,
             (g * 255.0) as u32,
             (b * 255.0) as u32
-        ));
-        
+        );
+        let provider = gtk4::CssProvider::new();
+        provider.load_from_data(&css);
         preset_btn.style_context().add_provider(&provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+        preset_btn.add_css_class(&format!("preset-{}", name.to_lowercase()));
         
         let rgba = gtk4::gdk::RGBA::new(r, g, b, 1.0);
-        let terminal_background_weak = terminal_background_weak.clone();
-        let current_opacity_clone = current_opacity_clone.clone();
-        let current_color_clone = current_color_clone.clone();
-        let color_button_clone = color_button_clone_outer.clone();
-        
+        let color_button_clone = color_button.clone();
         preset_btn.connect_clicked(move |_| {
             color_button_clone.set_rgba(&rgba);
-            *current_color_clone.borrow_mut() = rgba.clone();
-            
-            if let Some(background) = terminal_background_weak.upgrade() {
-                let opacity = *current_opacity_clone.borrow();
-                update_terminal_background(&background, opacity, &rgba);
-            }
         });
         
         presets_box.append(&preset_btn);
     }
     
-    // Connect color button changes
-    let terminal_background_weak = terminal_background.downgrade();
-    let current_opacity_clone = current_opacity.clone();
-    let current_color_clone = current_color.clone();
-    
-    color_button.connect_rgba_notify(move |color_button| {
-        let rgba = color_button.rgba();
-        *current_color_clone.borrow_mut() = rgba.clone();
-        
-        if let Some(background) = terminal_background_weak.upgrade() {
-            let opacity = *current_opacity_clone.borrow();
-            update_terminal_background(&background, opacity, &rgba);
-        }
-    });
-    
     color_box.append(&color_label_box);
     color_box.append(&presets_box);
     
-    // Blur radius slider - Disabled for now to avoid crashes
-    let blur_box = Box::new(Orientation::Vertical, 6);
-    let blur_label_box = Box::new(Orientation::Horizontal, 0);
-    let blur_label = Label::new(Some("Blur Radius: (Disabled - API Issue)"));
-    blur_label.set_hexpand(true);
-    blur_label.set_halign(gtk4::Align::Start);
-    blur_label.add_css_class("control-label");
-    
-    let blur_value = Label::new(Some("N/A"));
-    blur_value.add_css_class("control-value");
-    
-    blur_label_box.append(&blur_label);
-    blur_label_box.append(&blur_value);
-    
-    let blur_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    blur_slider.set_value(50.0);
-    blur_slider.set_sensitive(false); // Disable the slider
-    
-    blur_box.append(&blur_label_box);
-    blur_box.append(&blur_slider);
-    
-    // Info section - More compact
-    let info_box = Box::new(Orientation::Vertical, 4);
+    // Info section
+    let info_box = Box::new(Orientation::Vertical, 6);
+    let info_title_box = Box::new(Orientation::Horizontal, 4);
+    let info_icon = Label::new(Some("i"));
     let info_title = Label::new(Some("Architecture Note:"));
-    info_title.set_halign(gtk4::Align::Start);
-    info_title.add_css_class("control-label");
+    info_title.add_css_class("info-title");
+    info_title_box.append(&info_icon);
+    info_title_box.append(&info_title);
     
     let info_lines = [
-        "• Opacity: 0% = fully transparent, 100% = fully opaque",
+        "• Transparency: 0% = fully opaque, 100% = fully transparent",
+        "• Blur radius: adjusts desktop blur intensity",
         "• Glass tint: adds color overlay effect",
-        "• Blur radius: Currently disabled due to API issues",
+        "• White tint = frosted glass, Colors = stained glass",
     ];
     
-    info_box.append(&info_title);
+    info_box.append(&info_title_box);
     for line in info_lines {
         let info_label = Label::new(Some(line));
+        info_label.add_css_class("info-text");
         info_label.set_halign(gtk4::Align::Start);
-        info_label.add_css_class("control-label");
         info_box.append(&info_label);
     }
     
-    let warning = Label::new(Some("Private API - May break in future macOS versions"));
+    let warning = Label::new(Some("WARNING: Private API - May break in future macOS versions"));
     warning.add_css_class("warning-text");
     info_box.append(&warning);
     
-    // Reordered controls: Opacity first, then Color, then Blur
-    controls.append(&controls_title);
-    controls.append(&opacity_box);
-    controls.append(&color_box);
+    controls.append(&controls_title_box);
+    controls.append(&transparency_box);
     controls.append(&blur_box);
+    controls.append(&color_box);
     controls.append(&gtk4::Separator::new(Orientation::Horizontal));
     controls.append(&info_box);
     
-    // Add terminal and controls directly to main box (no header)
-    main_box.append(&terminal_background);
+    main_box.append(&header);
+    main_box.append(&terminal_scroll);
     main_box.append(&controls);
     
     window.set_child(Some(&main_box));
     
-    // Load CSS styling and apply initial color/opacity
-    load_css();
+    // Apply initial blur after window is realized
+    let window_weak = window.downgrade();
+    let blur_manager_clone = blur_manager.clone();
+    glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
+        if let Some(win) = window_weak.upgrade() {
+            blur_manager_clone.set_blur(&win, 50);
+        }
+        glib::ControlFlow::Break
+    });
     
+    load_css();
     window.present();
 }
 

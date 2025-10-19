@@ -14,4 +14,4 @@ glib = "0.21.3"
 
 
 [build-dependencies]
-# cc = "1.0"
+cc = "1.0"
