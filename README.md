@@ -51,17 +51,17 @@ unsafe extern "C" {
 
 #### 🎯 Key Learning Milestones
 
-**Week 1-2: Foundation Building**
+**Week 1: Foundation Building**
 - Understanding macOS window composition system
 - Learning Objective-C runtime and message passing
 - Exploring existing open-source blur implementations
 
-**Week 3-4: Bridge Development**
+**Week 2: Bridge Development**
 - Creating stable Rust ↔ Objective-C communication layer
 - Handling GTK4 window lifecycle with native effects
 - Debugging memory management issues across languages
 
-**Week 5-6: Polish & Refinement**
+**Week 3-4: Polish & Refinement**
 - Real-time parameter adjustment implementation
 - Color tint and opacity synchronization
 - Performance optimization and error handling
