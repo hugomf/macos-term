@@ -140,7 +140,7 @@ macos-term/
 ### Build Steps
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone git@github.com:hugomf/macos-term.git
 cd macos-term
 
 # Build the project
