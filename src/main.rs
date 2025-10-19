@@ -50,33 +50,12 @@ fn load_css() {
         "window {
             background: transparent;
         }
-        .header {
-            background: rgba(51, 51, 64, 1.0);
-            padding: 12px;
-        }
-        .header-title {
-            color: white;
-            font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
-            font-size: 13px;
-            font-weight: 600;
-        }
-        .traffic-light {
-            min-width: 12px;
-            min-height: 12px;
-            border-radius: 6px;
-        }
-        .traffic-light.red {
-            background: #ff5f56;
-        }
-        .traffic-light.yellow {
-            background: #ffbd2e;
-        }
-        .traffic-light.green {
-            background: #27c93f;
-        }
         .terminal-viewport {
-            background: rgba(0, 0, 0, 0.3);
             border: 1px solid rgba(0, 255, 255, 0.3);
+        }
+        .terminal-background {
+            /* This will handle the background with opacity and color */
+            background: rgba(0, 0, 0, 0.7); /* Start with 70% opacity (30% transparency) */
         }
         .terminal-text {
             font-family: 'SF Mono', Monaco, Menlo, 'DejaVu Sans Mono', 'Bitstream Vera Sans Mono', monospace;
@@ -182,37 +161,22 @@ fn build_ui(app: &Application) {
     let blur_manager = Rc::new(WindowBlurManager::new());
     let main_box = Box::new(Orientation::Vertical, 0);
     
-    // Store current transparency
-    let current_transparency = Rc::new(RefCell::new(70.0));
+    // Store current opacity and color
+    let current_opacity = Rc::new(RefCell::new(0.7)); // Start with 70% opacity
+    let current_color = Rc::new(RefCell::new(gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0)));
     
-    // Header
-    let header = Box::new(Orientation::Horizontal, 0);
-    header.add_css_class("header");
+    // Terminal viewport with separate background
+    let terminal_container = Box::new(Orientation::Vertical, 0);
     
-    let title = Label::new(Some("Terminal - Custom Blur API"));
-    title.add_css_class("header-title");
-    title.set_hexpand(true);
-    title.set_halign(gtk4::Align::Start);
+    // Background box that will handle transparency and color
+    let terminal_background = Box::new(Orientation::Vertical, 0);
+    terminal_background.add_css_class("terminal-background");
     
-    let traffic_lights = Box::new(Orientation::Horizontal, 6);
-    for color in ["red", "yellow", "green"] {
-        let circle = Box::new(Orientation::Horizontal, 0);
-        circle.set_size_request(12, 12);
-        circle.add_css_class("traffic-light");
-        circle.add_css_class(color);
-        traffic_lights.append(&circle);
-    }
-    
-    header.append(&title);
-    header.append(&traffic_lights);
-    
-    // Terminal viewport
     let terminal_scroll = ScrolledWindow::builder()
         .vexpand(true)
         .hexpand(true)
         .build();
     terminal_scroll.add_css_class("terminal-viewport");
-    terminal_scroll.set_opacity(0.3); // Initial 70% transparency = 30% opacity
     
     let terminal_content = Box::new(Orientation::Vertical, 6);
     terminal_content.set_margin_start(12);
@@ -223,7 +187,7 @@ fn build_ui(app: &Application) {
     terminal_content.append(&create_terminal_line("Last login: Sun Oct 19 14:23:45 on ttys001", "gray"));
     terminal_content.append(&create_terminal_prompt());
     
-    for i in 0..15 {
+    for i in 0..20 {
         terminal_content.append(&create_terminal_prompt());
         terminal_content.append(&create_terminal_line(
             &format!("echo 'Testing blur radius: {}'", i * 5),
@@ -238,6 +202,10 @@ fn build_ui(app: &Application) {
     terminal_content.append(&create_terminal_prompt());
     terminal_scroll.set_child(Some(&terminal_content));
     
+    // Add the scroll window to the background box using append()
+    terminal_background.append(&terminal_scroll);
+    terminal_container.append(&terminal_background);
+    
     // Controls panel
     let controls = Box::new(Orientation::Vertical, 20);
     controls.add_css_class("controls-panel");
@@ -249,37 +217,63 @@ fn build_ui(app: &Application) {
     controls_title_box.append(&sparkles);
     controls_title_box.append(&controls_title);
     
-    // Transparency slider
-    let transparency_box = Box::new(Orientation::Vertical, 8);
-    let transparency_label_box = Box::new(Orientation::Horizontal, 0);
-    let transparency_label = Label::new(Some("Transparency:"));
-    transparency_label.add_css_class("control-label");
-    transparency_label.set_hexpand(true);
-    transparency_label.set_halign(gtk4::Align::Start);
-    let transparency_value = Label::new(Some("70%"));
-    transparency_value.add_css_class("control-value");
-    transparency_label_box.append(&transparency_label);
-    transparency_label_box.append(&transparency_value);
+    // Opacity slider (opposite of transparency)
+    let opacity_box = Box::new(Orientation::Vertical, 8);
+    let opacity_label_box = Box::new(Orientation::Horizontal, 0);
+    let opacity_label = Label::new(Some("Opacity:"));
+    opacity_label.add_css_class("control-label");
+    opacity_label.set_hexpand(true);
+    opacity_label.set_halign(gtk4::Align::Start);
+    let opacity_value = Label::new(Some("70%"));
+    opacity_value.add_css_class("control-value");
+    opacity_label_box.append(&opacity_label);
+    opacity_label_box.append(&opacity_value);
     
-    let transparency_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
-    transparency_slider.set_value(70.0);
+    let opacity_slider = Scale::with_range(Orientation::Horizontal, 0.0, 100.0, 1.0);
+    opacity_slider.set_value(70.0);
     
-    let terminal_scroll_weak = terminal_scroll.downgrade();
-    let transparency_value_clone = transparency_value.clone();
-    let current_transparency_clone = current_transparency.clone();
-    transparency_slider.connect_value_changed(move |slider| {
-        let value = slider.value();
-        transparency_value_clone.set_text(&format!("{:.0}%", value));
-        *current_transparency_clone.borrow_mut() = value;
-        
-        if let Some(scroll) = terminal_scroll_weak.upgrade() {
-            // Convert transparency to opacity: 0% transparency = 1.0 opacity, 100% transparency = 0.0 opacity
-            scroll.set_opacity(1.0 - (value / 100.0));
+    let opacity_value_clone = opacity_value.clone();
+    let current_opacity_clone = current_opacity.clone();
+    let current_color_clone = current_color.clone();
+    
+    // Create a CSS provider for the background
+    let background_provider = gtk4::CssProvider::new();
+    let terminal_background_weak = terminal_background.downgrade();
+    
+    // Function to update background with current color and opacity
+    let update_background = {
+        let background_provider = background_provider.clone();
+        let terminal_background_weak = terminal_background_weak.clone();
+        move |color: &gtk4::gdk::RGBA, opacity: f64| {
+            if let Some(background) = terminal_background_weak.upgrade() {
+                let css = format!(
+                    ".terminal-background {{ background: rgba({}, {}, {}, {}); }}",
+                    (color.red() * 255.0) as u32,
+                    (color.green() * 255.0) as u32,
+                    (color.blue() * 255.0) as u32,
+                    opacity
+                );
+                background_provider.load_from_data(&css);
+                background.style_context().add_provider(&background_provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            }
+        }
+    };
+    
+    opacity_slider.connect_value_changed({
+        let update_background = update_background.clone();
+        let current_color_clone = current_color.clone();
+        move |slider| {
+            let opacity_value = slider.value() / 100.0;
+            opacity_value_clone.set_text(&format!("{:.0}%", slider.value()));
+            *current_opacity_clone.borrow_mut() = opacity_value;
+            
+            let color = *current_color_clone.borrow();
+            update_background(&color, opacity_value);
         }
     });
     
-    transparency_box.append(&transparency_label_box);
-    transparency_box.append(&transparency_slider);
+    opacity_box.append(&opacity_label_box);
+    opacity_box.append(&opacity_slider);
     
     // Blur radius slider
     let blur_box = Box::new(Orientation::Vertical, 8);
@@ -325,6 +319,19 @@ fn build_ui(app: &Application) {
     color_label_box.append(&color_label);
     color_label_box.append(&color_button);
     
+    // Color picker callback
+    {
+        let update_background = update_background.clone();
+        let current_color_clone = current_color.clone();
+        let current_opacity_clone = current_opacity.clone();
+        color_button.connect_rgba_notify(move |color_button| {
+            let color = color_button.rgba();
+            *current_color_clone.borrow_mut() = color;
+            let opacity = *current_opacity_clone.borrow();
+            update_background(&color, opacity);
+        });
+    }
+    
     // Preset colors
     let presets_box = Box::new(Orientation::Horizontal, 8);
     let presets_label = Label::new(Some("Presets:"));
@@ -360,8 +367,14 @@ fn build_ui(app: &Application) {
         
         let rgba = gtk4::gdk::RGBA::new(r, g, b, 1.0);
         let color_button_clone = color_button.clone();
+        let update_background = update_background.clone();
+        let current_color_clone = current_color.clone();
+        let current_opacity_clone = current_opacity.clone();
         preset_btn.connect_clicked(move |_| {
             color_button_clone.set_rgba(&rgba);
+            *current_color_clone.borrow_mut() = rgba;
+            let opacity = *current_opacity_clone.borrow();
+            update_background(&rgba, opacity);
         });
         
         presets_box.append(&preset_btn);
@@ -380,8 +393,8 @@ fn build_ui(app: &Application) {
     info_title_box.append(&info_title);
     
     let info_lines = [
-        "• Transparency: 0% = fully opaque, 100% = fully transparent",
-        "• Blur radius: adjusts desktop blur intensity",
+        "• Opacity: 0% = fully transparent, 100% = fully opaque",
+        "• Blur radius: adjusts desktop blur intensity", 
         "• Glass tint: adds color overlay effect",
         "• White tint = frosted glass, Colors = stained glass",
     ];
@@ -399,14 +412,14 @@ fn build_ui(app: &Application) {
     info_box.append(&warning);
     
     controls.append(&controls_title_box);
-    controls.append(&transparency_box);
+    controls.append(&opacity_box);
     controls.append(&blur_box);
     controls.append(&color_box);
     controls.append(&gtk4::Separator::new(Orientation::Horizontal));
     controls.append(&info_box);
     
-    main_box.append(&header);
-    main_box.append(&terminal_scroll);
+    // Remove header and just use terminal and controls
+    main_box.append(&terminal_container);
     main_box.append(&controls);
     
     window.set_child(Some(&main_box));
