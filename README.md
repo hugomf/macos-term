@@ -1,6 +1,6 @@
-# macOS Terminal with Native Blur Effects
+# Rust GTK macOS App with Native Blur Effects
 
-A cross-platform terminal application built in Rust that demonstrates native library integration for advanced window effects. Currently implemented for macOS with plans for Linux and Windows support.
+A cross-platform terminal application built in **Rust** that demonstrates native library integration for advanced window effects. Currently implemented for macOS with plans for Linux and Windows support.
 
 ## 🎯 Project Purpose
 
@@ -18,6 +18,12 @@ This project serves as a learning platform for understanding **Rust-native libra
 - **Opacity Management**: Adjustable window transparency
 - **GTK4 Interface**: Modern, responsive UI with terminal-style aesthetics
 - **Native Bridge**: Direct communication between Rust and Objective-C
+
+### 📸 Application Preview
+
+![macOS Terminal with Blur Effects](images/rust-blur.png)
+
+*The application showcases real-time window blur effects with adjustable opacity, blur radius, and glass tint controls.*
 
 ### Technical Architecture
 
