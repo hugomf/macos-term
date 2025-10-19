@@ -10,6 +10,79 @@ This project serves as a learning platform for understanding **Rust-native libra
 - **Linux**: Explore X11/Wayland native window management and compositing
 - **Windows**: Implement DWM (Desktop Window Manager) API integration
 
+## 💡 Implementation Journey & Challenges
+
+### The Road to Native Blur Effects
+
+This project represents the culmination of extensive research and experimentation with macOS native APIs. The journey began with a **100% native SwiftUI prototype** ([TerminalPrototypeApp](https://github.com/hugomf/TerminalPrototypeApp)) where we learned:
+
+#### 🔍 Initial Research Phase
+- **Deep dive into macOS private APIs** - Understanding WindowServer and CoreGraphics frameworks
+- **Reverse engineering** existing applications with blur effects (Terminal, Finder)
+- **API discovery** through system monitoring and header file analysis
+- **SwiftUI limitations** - Realizing native frameworks require AppKit/Cocoa bridging
+
+#### 🛠️ Technical Challenges Overcome
+
+**1. Private API Integration**
+```objc
+// Challenge: Accessing undocumented WindowServer functions
+extern OSStatus CGSSetWindowBackgroundBlurRadius(int window_id, int radius);
+extern int CGSMainConnectionID(void);
+```
+- **Solution**: Custom Objective-C bridge with careful memory management
+- **Risk**: APIs may break with macOS updates (notarized apps may be rejected)
+
+**2. Cross-Language Communication**
+```rust
+// Challenge: Rust ↔ Objective-C interoperability
+unsafe extern "C" {
+    fn macos_blur_init() -> i32;
+    fn macos_blur_apply_to_gtk_window(window: *mut gtk4::ffi::GtkWindow, radius: u32) -> i32;
+}
+```
+- **Solution**: FFI (Foreign Function Interface) with proper type bridging
+- **Struggle**: Memory management across language boundaries
+
+**3. GTK4 Window Integration**
+- **Challenge**: Applying macOS-specific effects to cross-platform GTK windows
+- **Solution**: Window handle extraction and native API bridging
+- **Complexity**: Coordinating GTK event loop with native macOS calls
+
+#### 🎯 Key Learning Milestones
+
+**Week 1-2: Foundation Building**
+- Understanding macOS window composition system
+- Learning Objective-C runtime and message passing
+- Exploring existing open-source blur implementations
+
+**Week 3-4: Bridge Development**
+- Creating stable Rust ↔ Objective-C communication layer
+- Handling GTK4 window lifecycle with native effects
+- Debugging memory management issues across languages
+
+**Week 5-6: Polish & Refinement**
+- Real-time parameter adjustment implementation
+- Color tint and opacity synchronization
+- Performance optimization and error handling
+
+#### 🚧 Ongoing Challenges
+
+**API Stability**
+- Private APIs evolve with macOS versions
+- Need for continuous testing across macOS releases
+- Risk mitigation through fallback mechanisms
+
+**Cross-Platform Vision**
+- Each platform requires completely different approaches
+- Linux: Wayland vs X11 fragmentation
+- Windows: DWM API versioning complexity
+
+**Performance Considerations**
+- Balancing visual effects with system responsiveness
+- Memory usage optimization for real-time updates
+- Battery life impact on portable Macs
+
 ## 🚀 Features
 
 ### Current (macOS)
