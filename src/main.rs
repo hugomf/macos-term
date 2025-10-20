@@ -75,7 +75,7 @@ fn load_css() {
         }
         .controls-panel {
             background: rgba(38, 38, 51, 1.0);
-            padding: 20px;
+            padding: 12px;
         }
         .controls-title {
             color: white;
@@ -155,7 +155,7 @@ fn build_ui(app: &Application) {
         .application(app)
         .title("Terminal - Custom Blur API")
         .default_width(800)
-        .default_height(600)
+        .default_height(700)
         .build();
 
     let blur_manager = Rc::new(WindowBlurManager::new());
@@ -165,8 +165,10 @@ fn build_ui(app: &Application) {
     let current_opacity = Rc::new(RefCell::new(0.7)); // Start with 70% opacity
     let current_color = Rc::new(RefCell::new(gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0)));
     
-    // Terminal viewport with separate background
+    // Terminal viewport with separate background - takes 70% of space
     let terminal_container = Box::new(Orientation::Vertical, 0);
+    terminal_container.set_vexpand(true);
+    terminal_container.set_hexpand(true);
     
     // Background box that will handle transparency and color
     let terminal_background = Box::new(Orientation::Vertical, 0);
@@ -206,9 +208,11 @@ fn build_ui(app: &Application) {
     terminal_background.append(&terminal_scroll);
     terminal_container.append(&terminal_background);
     
-    // Controls panel
-    let controls = Box::new(Orientation::Vertical, 20);
+    // Controls panel - very compact spacing, takes minimum space
+    let controls = Box::new(Orientation::Vertical, 6);
     controls.add_css_class("controls-panel");
+    controls.set_vexpand(false);
+    controls.set_vexpand_set(true);
     
     let controls_title_box = Box::new(Orientation::Horizontal, 6);
     let sparkles = Label::new(Some("*"));
@@ -217,8 +221,8 @@ fn build_ui(app: &Application) {
     controls_title_box.append(&sparkles);
     controls_title_box.append(&controls_title);
     
-    // Opacity slider (opposite of transparency)
-    let opacity_box = Box::new(Orientation::Vertical, 8);
+    // Opacity slider (opposite of transparency) - very compact
+    let opacity_box = Box::new(Orientation::Vertical, 2);
     let opacity_label_box = Box::new(Orientation::Horizontal, 0);
     let opacity_label = Label::new(Some("Opacity:"));
     opacity_label.add_css_class("control-label");
@@ -275,8 +279,8 @@ fn build_ui(app: &Application) {
     opacity_box.append(&opacity_label_box);
     opacity_box.append(&opacity_slider);
     
-    // Blur radius slider
-    let blur_box = Box::new(Orientation::Vertical, 8);
+    // Blur radius slider - very compact
+    let blur_box = Box::new(Orientation::Vertical, 2);
     let blur_label_box = Box::new(Orientation::Horizontal, 0);
     let blur_label = Label::new(Some("Blur Radius:"));
     blur_label.add_css_class("control-label");
@@ -305,8 +309,8 @@ fn build_ui(app: &Application) {
     blur_box.append(&blur_label_box);
     blur_box.append(&blur_slider);
     
-    // Color picker
-    let color_box = Box::new(Orientation::Vertical, 8);
+    // Color picker - compact
+    let color_box = Box::new(Orientation::Vertical, 4);
     let color_label_box = Box::new(Orientation::Horizontal, 0);
     let color_label = Label::new(Some("Glass Tint:"));
     color_label.add_css_class("control-label");
@@ -383,8 +387,8 @@ fn build_ui(app: &Application) {
     color_box.append(&color_label_box);
     color_box.append(&presets_box);
     
-    // Info section
-    let info_box = Box::new(Orientation::Vertical, 6);
+    // Info section - compact
+    let info_box = Box::new(Orientation::Vertical, 3);
     let info_title_box = Box::new(Orientation::Horizontal, 4);
     let info_icon = Label::new(Some("i"));
     let info_title = Label::new(Some("Architecture Note:"));
