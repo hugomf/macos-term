@@ -99,7 +99,9 @@ int macos_blur_apply_to_gtk_window(GtkWindow *gtk_window, uint32_t radius) {
 
     // Configure NSWindow for transparency (required for blur to work)
     [ns_window setOpaque:NO];
-    [ns_window setBackgroundColor:[NSColor clearColor]];
+    if (radius > 0) {
+        [ns_window setBackgroundColor:[NSColor clearColor]];
+    }
     [ns_window setHasShadow:YES];
 
     // Get window number for CGS API

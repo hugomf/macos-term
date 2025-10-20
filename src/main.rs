@@ -247,7 +247,6 @@ fn build_ui(app: &Application) {
     
     let opacity_value_clone = opacity_value.clone();
     let current_opacity_clone = current_opacity.clone();
-    let current_color_clone = current_color.clone();
     
     // Create CSS providers for the background and border
     let background_provider = gtk4::CssProvider::new();
@@ -291,8 +290,10 @@ fn build_ui(app: &Application) {
         let update_background = update_background.clone();
         let current_color_clone = current_color.clone();
         move |slider| {
-            let opacity_value = slider.value() / 100.0;
-            opacity_value_clone.set_text(&format!("{:.0}%", slider.value()));
+            let slider_value = slider.value();
+            // Clamp opacity to max 99% to avoid rendering issues
+            let opacity_value = (slider_value / 100.0).min(0.99);
+            opacity_value_clone.set_text(&format!("{:.0}%", slider_value));
             *current_opacity_clone.borrow_mut() = opacity_value;
             
             let color = *current_color_clone.borrow();
@@ -451,6 +452,11 @@ fn build_ui(app: &Application) {
     main_box.append(&controls);
     
     window.set_child(Some(&main_box));
+    
+    // Handle window close to avoid GTK warnings
+    window.connect_close_request(|_| {
+        glib::Propagation::Proceed
+    });
     
     // Apply initial blur and set titlebar opaque after window is realized
     let window_weak = window.downgrade();
