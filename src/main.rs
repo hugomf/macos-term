@@ -7,6 +7,7 @@ use std::cell::RefCell;
 unsafe extern "C" {
     fn macos_blur_init() -> i32;
     fn macos_blur_apply_to_gtk_window(window: *mut gtk4::ffi::GtkWindow, radius: u32) -> i32;
+    fn macos_set_titlebar_opaque(window: *mut gtk4::ffi::GtkWindow) -> i32;
 }
 
 struct WindowBlurManager {
@@ -158,6 +159,14 @@ fn build_ui(app: &Application) {
         .default_height(700)
         .build();
 
+    // Ensure window supports transparency
+    if let Some(surface) = window.surface() {
+        let display = surface.display();
+        if display.is_rgba() {
+            println!("✅ Display supports RGBA");
+        }
+    }
+
     let blur_manager = Rc::new(WindowBlurManager::new());
     let main_box = Box::new(Orientation::Vertical, 0);
     
@@ -240,14 +249,18 @@ fn build_ui(app: &Application) {
     let current_opacity_clone = current_opacity.clone();
     let current_color_clone = current_color.clone();
     
-    // Create a CSS provider for the background
+    // Create CSS providers for the background and border
     let background_provider = gtk4::CssProvider::new();
+    let border_provider = gtk4::CssProvider::new();
     let terminal_background_weak = terminal_background.downgrade();
+    let terminal_scroll_weak = terminal_scroll.downgrade();
     
-    // Function to update background with current color and opacity
+    // Function to update background and border with current color and opacity
     let update_background = {
         let background_provider = background_provider.clone();
+        let border_provider = border_provider.clone();
         let terminal_background_weak = terminal_background_weak.clone();
+        let terminal_scroll_weak = terminal_scroll_weak.clone();
         move |color: &gtk4::gdk::RGBA, opacity: f64| {
             if let Some(background) = terminal_background_weak.upgrade() {
                 let css = format!(
@@ -259,6 +272,17 @@ fn build_ui(app: &Application) {
                 );
                 background_provider.load_from_data(&css);
                 background.style_context().add_provider(&background_provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
+            }
+            
+            if let Some(scroll) = terminal_scroll_weak.upgrade() {
+                let border_css = format!(
+                    ".terminal-viewport {{ border: 1px solid rgba({}, {}, {}, 0.5); }}",
+                    (color.red() * 255.0) as u32,
+                    (color.green() * 255.0) as u32,
+                    (color.blue() * 255.0) as u32
+                );
+                border_provider.load_from_data(&border_css);
+                scroll.style_context().add_provider(&border_provider, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
             }
         }
     };
@@ -428,12 +452,21 @@ fn build_ui(app: &Application) {
     
     window.set_child(Some(&main_box));
     
-    // Apply initial blur after window is realized
+    // Apply initial blur and set titlebar opaque after window is realized
     let window_weak = window.downgrade();
     let blur_manager_clone = blur_manager.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(200), move || {
         if let Some(win) = window_weak.upgrade() {
             blur_manager_clone.set_blur(&win, 50);
+            
+            // Make titlebar opaque
+            let window_ptr = win.as_ptr() as *mut gtk4::ffi::GtkWindow;
+            let result = unsafe { macos_set_titlebar_opaque(window_ptr) };
+            if result == 0 {
+                println!("✅ Titlebar set to opaque");
+            } else {
+                eprintln!("❌ Failed to set titlebar opaque: result={}", result);
+            }
         }
         glib::ControlFlow::Break
     });

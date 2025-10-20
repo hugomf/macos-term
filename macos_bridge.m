@@ -101,7 +101,6 @@ int macos_blur_apply_to_gtk_window(GtkWindow *gtk_window, uint32_t radius) {
     [ns_window setOpaque:NO];
     [ns_window setBackgroundColor:[NSColor clearColor]];
     [ns_window setHasShadow:YES];
-    [ns_window setTitlebarAppearsTransparent:YES];
 
     // Get window number for CGS API
     NSInteger window_number = [ns_window windowNumber];
@@ -117,4 +116,46 @@ int macos_blur_apply_to_gtk_window(GtkWindow *gtk_window, uint32_t radius) {
     [ns_window invalidateShadow];
 
     return result;
+}
+
+// Set titlebar to be opaque
+int macos_set_titlebar_opaque(void* gtk_window_ptr) {
+    @autoreleasepool {
+        GtkWindow* gtk_window = (GtkWindow*)gtk_window_ptr;
+        if (!gtk_window) {
+            fprintf(stderr, "❌ NULL GTK window provided\n");
+            return -1;
+        }
+        
+        GdkSurface* surface = gtk_native_get_surface(GTK_NATIVE(gtk_window));
+        if (!surface) {
+            fprintf(stderr, "❌ Failed to get GdkSurface from GTK window\n");
+            return -2;
+        }
+        
+        // Verify we have a macOS surface
+        if (!GDK_IS_MACOS_SURFACE(surface)) {
+            fprintf(stderr, "❌ Surface is not a GdkMacosSurface\n");
+            return -3;
+        }
+        
+        // Use the official GTK4 macOS API to get NSWindow (same as blur function)
+        NSWindow *ns_window = (__bridge NSWindow *)gdk_macos_surface_get_native_window(GDK_MACOS_SURFACE(surface));
+        if (!ns_window) {
+            fprintf(stderr, "❌ Failed to get NSWindow from GdkMacosSurface\n");
+            return -4;
+        }
+        
+        printf("✅ Setting titlebar opaque for NSWindow: %p\n", (__bridge void*)ns_window);
+        
+        // Make title bar opaque
+        [ns_window setTitlebarAppearsTransparent:NO];
+        
+        // Set title bar color to match control panel
+        [ns_window setBackgroundColor:[NSColor clearColor]];
+        
+        printf("✅ Titlebar set to opaque successfully\n");
+        
+        return 0;
+    }
 }
